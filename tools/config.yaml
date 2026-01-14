@@ -1,0 +1,28 @@
+project:
+  name: my-python-project
+  version: 1.0.0
+
+repository:
+  url: "https://github.com/your-org/your-repo.git"
+  branch: "main"
+  install_method: "pip"     # or "local", "editable", etc.
+
+docker:
+  executable_path: "C:/Program Files/Docker/Docker/Docker Desktop.exe"
+  timeout_seconds: 90
+  check_interval_seconds: 2
+  use_desktop: true         # for Windows/macOS
+  use_daemon: false         # for Linux systemd
+
+paths:
+  source_dir: "./src"
+  tests_dir: "./tests"
+  build_dir: "./build"
+  docs_dir: "./docs"
+  logs_dir: "./logs"
+
+workflow:
+  steps:
+    - "unitTestsLauncher.py all"
+    - "swCmpBuildCheck.py"
+    - "swCmpDocsGenerator.py"
