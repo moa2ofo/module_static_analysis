@@ -63,6 +63,8 @@ class TestResultRow:
     passed: str
     failed: str
     ignored: str
+    linesCvrg: str
+    branchesCvrg: str
     date_time: str
     tester: str
 
@@ -73,6 +75,8 @@ class TestResultRow:
             f"{self.passed},"
             f"{self.failed},"
             f"{self.ignored},"
+            f"{self.linesCvrg},"
+            f"{self.branchesCvrg},"
             f"{self.date_time},"
             f"{self.tester}"
         )
@@ -297,7 +301,7 @@ def load_result_rows(summary_file: Path) -> dict[str, TestResultRow]:
         return rows
 
     first_non_empty = next((ln for ln in lines if ln.strip()), "")
-    header_csv = "function_name,total,passed,failed,ignored,Date and time,Tester"
+    header_csv = "function_name,total,passed,failed,ignored,linesCvrg,branchesCvrg,Date and time,Tester"
 
     if first_non_empty.startswith("|"):
         header_cells: list[str] = []
@@ -328,6 +332,8 @@ def load_result_rows(summary_file: Path) -> dict[str, TestResultRow]:
         idx_passed = idx("passed")
         idx_failed = idx("failed")
         idx_ignored = idx("ignored")
+        idx_lines  = idx("linesCvrg")
+        idx_branches = idx("branchesCvrg")
         idx_date   = idx("Date and time")
         idx_tester = idx("Tester")
 
@@ -346,6 +352,8 @@ def load_result_rows(summary_file: Path) -> dict[str, TestResultRow]:
                 passed=get_cell(row, idx_passed),
                 failed=get_cell(row, idx_failed),
                 ignored=get_cell(row, idx_ignored),
+                linesCvrg=get_cell(row, idx_lines),
+                branchesCvrg=get_cell(row, idx_branches),
                 date_time=get_cell(row, idx_date),
                 tester=get_cell(row, idx_tester),
             )
@@ -362,19 +370,20 @@ def load_result_rows(summary_file: Path) -> dict[str, TestResultRow]:
         parts = [p.strip() for p in stripped.split(",")]
         if len(parts) < 5:
             continue
-        while len(parts) < 7:
+        while len(parts) < 9:
             parts.append("")
-        fn, t, p, f, ig, dt, tst = parts[:7]
+        fn, t, p, f, ig, lc, bc, dt, tst = parts[:9]
         if not fn:
             continue
-        rows[fn] = TestResultRow(fn, t, p, f, ig, dt, tst)
+        rows[fn] = TestResultRow(fn, t, p, f, ig, lc, bc, dt, tst)
 
     return rows
 
 
 def update_total_result_report(build_folder: Path, function_name: str, report_folder: Path):
-    pass_file = build_folder / "test" / "results" / f"test_{function_name}.pass"
-    fail_file = build_folder / "test" / "results" / f"test_{function_name}.fail"
+    pass_file = build_folder / "gcov" / "results" / f"test_{function_name}.pass"
+    fail_file = build_folder / "gcov" / "results" / f"test_{function_name}.fail"
+    coverage_file = build_folder / "artifacts" / "gcov" / "gcovr" / "GcovCoverageResults.functions.html"
     report_file = pass_file if pass_file.exists() else fail_file
 
     now_str = datetime.now().strftime("%d/%m/%y %H:%M")
@@ -385,8 +394,35 @@ def update_total_result_report(build_folder: Path, function_name: str, report_fo
 
     rows = load_result_rows(summary_file)
 
+    def extract_coverage_percent(html_text: str, label: str) -> Optional[str]:
+        # Looks for rows like:
+        # <th scope="row">Lines:</th> ... <td class="...">100.0%</td>
+        # We capture the last <td> in that row (Coverage column).
+        row_re = re.compile(
+            rf"<tr>\s*<th[^>]*scope=\"row\"[^>]*>\s*{re.escape(label)}\s*</th>\s*"
+            rf"<td[^>]*>.*?</td>\s*<td[^>]*>.*?</td>\s*<td[^>]*>(?P<pct>[^<]+)</td>\s*</tr>",
+            re.IGNORECASE | re.DOTALL,
+        )
+        m = row_re.search(html_text)
+        if not m:
+            return None
+        return m.group("pct").strip()
+
+    linesCvrg: Optional[str] = None
+    branchesCvrg: Optional[str] = None
+    if coverage_file.exists():
+        try:
+            html = coverage_file.read_text(encoding="utf-8", errors="ignore")
+            linesCvrg = extract_coverage_percent(html, "Lines:")
+            branchesCvrg = extract_coverage_percent(html, "Branches:")
+        except Exception as e:
+            warn(f"Error reading coverage file '{coverage_file}': {e}")
+    else:
+        warn(f"Coverage file does not exist: {coverage_file}")
+
     # ============================================================
-    # ✅ NEW BEHAVIOR: if no report exists, still update summary
+    # If no report exists -> mark FAILED, but still store coverage
+    # (if available) so you can see what gcov produced.
     # ============================================================
     if not report_file.exists():
         warn(f"Report file does not exist: {report_file}. Marking as FAILED in summary.")
@@ -397,11 +433,13 @@ def update_total_result_report(build_folder: Path, function_name: str, report_fo
             passed="FAILED",
             failed="FAILED",
             ignored="FAILED",
+            linesCvrg=linesCvrg or "FAILED",
+            branchesCvrg=branchesCvrg or "FAILED",
             date_time=now_str,
-            tester=tester
+            tester=tester,
         )
 
-        header_csv = "function_name,total,passed,failed,ignored,Date and time,Tester"
+        header_csv = "function_name,total,passed,failed,ignored,linesCvrg,branchesCvrg,Date and time,Tester"
         lines_out = [header_csv] + [row.to_csv_line() for row in rows.values()]
         summary_file.write_text("\n".join(lines_out) + "\n", encoding="utf-8")
 
@@ -409,10 +447,9 @@ def update_total_result_report(build_folder: Path, function_name: str, report_fo
         return
 
     # ============================================================
-    # Normal flow: report exists -> parse values as before
+    # Normal flow: report exists -> parse values
     # ============================================================
     total = passed = failed = ignored = None
-
     try:
         for line in report_file.read_text(encoding="utf-8", errors="ignore").splitlines():
             line = line.strip()
@@ -435,15 +472,16 @@ def update_total_result_report(build_folder: Path, function_name: str, report_fo
             passed=passed,
             failed=failed,
             ignored=ignored,
+            linesCvrg=linesCvrg or "",
+            branchesCvrg=branchesCvrg or "",
             date_time=now_str,
-            tester=tester
+            tester=tester,
         )
 
-        header_csv = "function_name,total,passed,failed,ignored,Date and time,Tester"
+        header_csv = "function_name,total,passed,failed,ignored,linesCvrg,branchesCvrg,Date and time,Tester"
         lines_out = [header_csv] + [row.to_csv_line() for row in rows.values()]
         summary_file.write_text("\n".join(lines_out) + "\n", encoding="utf-8")
         info(f"Updated summary for '{function_name}': {summary_file}")
-
     except Exception as e:
         warn(f"Error updating report data: {e}. Marking as FAILED in summary.")
 
@@ -462,8 +500,6 @@ def update_total_result_report(build_folder: Path, function_name: str, report_fo
         summary_file.write_text("\n".join(lines_out) + "\n", encoding="utf-8")
 
         info(f"Updated summary for '{function_name}' (FAILED due to exception): {summary_file}")
-
-
 
 def format_total_result_report(report_folder: Path):
     summary_file = report_folder / RESULT_REPORT
