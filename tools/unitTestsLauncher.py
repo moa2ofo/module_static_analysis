@@ -514,7 +514,7 @@ def run_and_collect_results(module: UnitModule):
     function_name = module.function_name
     update_unit_under_test(module, function_name)
     run_cmd(DOCKER_CLEAN, check=True)
-    run_cmd(DOCKER_BASE + ["ceedling", f"test:{function_name}"], check=True, stopScript=False)
+    run_cmd(DOCKER_BASE + ["ceedling", f"gcov:{function_name}"], check=True, stopScript=False)
     update_total_result_report(UNIT_EXECUTION_FOLDER_BUILD, function_name, UNIT_RESULT_FOLDER)
     copy_folder_contents(UNIT_EXECUTION_FOLDER_BUILD, UNIT_RESULT_FOLDER / f"{function_name}Results")
 

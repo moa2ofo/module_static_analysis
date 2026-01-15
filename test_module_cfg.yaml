@@ -1,4 +1,5 @@
 repo_urls:
   - "https://github.com/moa2ofo/Crc8"
+  - "https://github.com/moa2ofo/TempMon"
 
 folder_path: "./tools/code"
