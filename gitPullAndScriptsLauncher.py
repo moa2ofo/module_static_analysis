@@ -347,6 +347,59 @@ def validate_cfg(cfg: Dict[str, Any]) -> Tuple[str, List[str]]:
 
     return folder_path, repo_urls
 
+def clear_folder_contents(folder_path: str) -> None:
+    """
+    Delete all files/folders *inside* folder_path, but keep folder_path itself.
+    """
+    if not os.path.isdir(folder_path):
+        raise ValueError(f"folder_path is not a directory: {folder_path}")
+
+    for name in os.listdir(folder_path):
+        p = os.path.join(folder_path, name)
+        if os.path.isdir(p) and not os.path.islink(p):
+            force_rmtree(p)
+        else:
+            try:
+                os.chmod(p, stat.S_IWRITE)
+            except Exception:
+                pass
+            try:
+                os.remove(p)
+            except FileNotFoundError:
+                pass
+
+
+def copy_folder_contents(src_dir: str, dst_dir: str) -> None:
+    """
+    Copy all files/folders inside src_dir into dst_dir (not nesting src_dir itself).
+    """
+    if not os.path.isdir(src_dir):
+        raise ValueError(f"Source directory does not exist: {src_dir}")
+
+    ensure_dir(dst_dir)
+
+    for name in os.listdir(src_dir):
+        s = os.path.join(src_dir, name)
+        d = os.path.join(dst_dir, name)
+
+        if os.path.isdir(s) and not os.path.islink(s):
+            if os.path.exists(d):
+                force_rmtree(d)
+            shutil.copytree(s, d)
+        else:
+            # For files (and symlinks treated as files)
+            if os.path.exists(d):
+                try:
+                    os.chmod(d, stat.S_IWRITE)
+                except Exception:
+                    pass
+                try:
+                    os.remove(d)
+                except Exception:
+                    pass
+            shutil.copy2(s, d)
+
+
 
 def main() -> None:
     github_url, cfg_path, recurse_submodules, python_exe = parse_args(sys.argv[1:])
@@ -399,6 +452,49 @@ def main() -> None:
     # 3) Run launchAll.py (one level above folder_path)
     run_launch_all(folder_path=folder_path, python_exe=python_exe)
     print("launchAll.py executed successfully.")
+
+    # 4) After launchAll: clear folder_path contents
+    try:
+        clear_folder_contents(folder_path)
+        print(f"Cleared contents of folder_path after launchAll: {folder_path}")
+    except Exception as e:
+        print(f"ERROR: cannot clear folder_path after launchAll: {e}")
+        sys.exit(EXIT_FOLDER_PATH_MISSING)
+
+    # 5) Copy ut results into ./uintTestReports (script directory)
+    folder_path_abs = os.path.abspath(folder_path)
+    parent_dir = os.path.abspath(os.path.join(folder_path_abs, os.pardir))
+
+    testRecordPath = os.path.join(parent_dir, "utExecutionAndResults", "utResults")
+
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    uintTestReports = os.path.join(script_dir, "uintTestReports")
+
+    # If uintTestReports exists and not empty -> delete all contents inside
+    ensure_dir(uintTestReports)
+    if os.listdir(uintTestReports):
+        try:
+            clear_folder_contents(uintTestReports)
+            print(f"Cleared existing contents of uintTestReports: {uintTestReports}")
+        except Exception as e:
+            print(f"ERROR: cannot clear uintTestReports folder: {e}")
+            sys.exit(1)
+
+    # Copy everything from testRecordPath into uintTestReports
+    try:
+        copy_folder_contents(testRecordPath, uintTestReports)
+        print(f"Copied contents from '{testRecordPath}' into '{uintTestReports}'")
+        # 6) After copying: delete all files/folders inside testRecordPath (recursive)
+        try:
+            clear_folder_contents(testRecordPath)
+            print(f"Cleared contents of testRecordPath after copy: {testRecordPath}")
+        except Exception as e:
+            print(f"ERROR: cannot clear testRecordPath folder: {e}")
+            sys.exit(1)
+    except Exception as e:
+        print(f"ERROR: cannot copy results from '{testRecordPath}' to '{uintTestReports}': {e}")
+        sys.exit(1)
+
 
 
 if __name__ == "__main__":
