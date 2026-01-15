@@ -1,0 +1,7 @@
+# Ignore Python bytecode files
+*.pyc
+__pycache__/
+
+# ignore uintTestReports's contents
+uintTestReports/*
+!uintTestReports/.gitkeep
