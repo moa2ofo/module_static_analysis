@@ -251,6 +251,50 @@ def clone_and_move_into_folder(
 
         shutil.move(clone_path, dest_path)
         return dest_path
+    
+def copy_clang_format_next_to_code(folder_path: str) -> None:
+    """
+    Copy .clang-format from the folder containing launchAll.py (parent of folder_path)
+    into the 'code' folder (folder_path), without removing the source.
+
+    Example:
+      folder_path = ".../tools/code"
+      parent_dir  = ".../tools"
+      copies ".../tools/.clang-format" -> ".../tools/code/.clang-format"
+    """
+    folder_path_abs = os.path.abspath(folder_path)
+    parent_dir = os.path.abspath(os.path.join(folder_path_abs, os.pardir))
+
+    src = os.path.join(parent_dir, ".clang-format")
+    dst = os.path.join(folder_path_abs, ".clang-format")
+
+    if not os.path.isfile(src):
+        # Make it fatal if you prefer; for now it's a warning.
+        print(f"WARNING: .clang-format not found in {parent_dir} (expected: {src}). Skipping copy.")
+        return
+
+    # If destination exists, overwrite it
+    if os.path.exists(dst):
+        try:
+            os.chmod(dst, stat.S_IWRITE)
+        except Exception:
+            pass
+        try:
+            os.remove(dst)
+        except Exception:
+            # If it's a directory for some reason, nuke it
+            if os.path.isdir(dst) and not os.path.islink(dst):
+                force_rmtree(dst)
+            else:
+                raise
+
+    try:
+        shutil.copy2(src, dst)  # preserves timestamps/metadata where possible
+        print(f"Copied .clang-format into code folder: {dst}")
+    except Exception as e:
+        print(f"ERROR: failed to copy .clang-format from '{src}' to '{dst}': {e}")
+        sys.exit(1)
+
 
 
 # ----------------------------
@@ -449,7 +493,10 @@ def main() -> None:
             print(f"ERROR: {e}")
             sys.exit(EXIT_GIT_CLONE_FAILED)
 
-    # 3) Run launchAll.py (one level above folder_path)
+    # 3a) Before launchAll.py: copy .clang-format from parent_dir into folder_path (code folder)
+    copy_clang_format_next_to_code(folder_path)
+
+    # 3b) Run launchAll.py (one level above folder_path)
     run_launch_all(folder_path=folder_path, python_exe=python_exe)
     print("launchAll.py executed successfully.")
 
