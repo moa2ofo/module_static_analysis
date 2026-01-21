@@ -10,6 +10,8 @@ import re
 from pathlib import Path
 from typing import Union, Dict
 import sys
+import subprocess
+
 
 from common_utils import (
     info, warn, error, fatal,
@@ -268,10 +270,11 @@ def scan_components(codebase_root: Path, template_content: str) -> list[Path]:
     created: list[Path] = []
 
     for target_dir in find_targets_with_subfolders(codebase_root, ("pltf", "cfg")):
-        cmake_path = target_dir / "CMakeLists.txt"
-        if cmake_path.exists():
-            info(f"Skipping existing CMakeLists.txt in: {target_dir}")
+        # ✅ Skip anything inside build directories
+        if "build" in target_dir.parts:
             continue
+
+        cmake_path = target_dir / "CMakeLists.txt"
 
         project_name = target_dir.name
         component_content = template_content.replace("projectName", project_name)
@@ -298,14 +301,19 @@ def scan_components(codebase_root: Path, template_content: str) -> list[Path]:
 def build_and_run_docker(script_dir: Path) -> None:
     info("Building Docker image: cmake-misra-multi")
     run_cmd(["docker", "build", "-t", "cmake-misra-multi", "."], cwd=script_dir, check=True)
-
     cwd = str(script_dir.resolve())
     info(f"Running analysis container with workspace: {cwd}")
-
     run_cmd(
-        ["docker", "run", "--rm", "-v", f"{cwd}:/workspace", "cmake-misra-multi", "build-and-check-all.sh"],
-        check=True,
+    [
+        "docker", "run", "--rm",
+        "-v", f"{cwd}:/workspace",
+        "cmake-misra-multi",
+        "bash", "-lc",
+        "run-clang-format-all.sh && build-and-check-all.sh"
+    ],
+    check=True,
     )
+
 
 
 def generate_reports(codebase_root: Path, misra_rules_path: Path) -> None:
